@@ -1,0 +1,245 @@
+clear all
+% R = rand(4,5,6,7);
+R1 = [-10,1.4;1.6,1.5;2,-10]/10;
+R(:,:,1) = R1;
+R(:,:,2) = [-10,1.4;1.6,1.5;2.4,-10]/10 - 0.01;
+n = length(size(R));
+l = max(size(R));
+%pi_1 = [0.1;0.4;0.5]; pi_2 = [0.5;0.5]; 
+% random initialization
+for i = 1:n
+    li = size(R,i);
+    pi(:,i) = [1/li*ones(li,1);zeros(l-li,1)];
+end
+
+eta = 10;
+%% PG
+T = 5000;
+%T = 20000;
+
+[pi_lst, r_lst, c_lst,g_lst, NE_lst] = PG(pi, R, T, eta);
+
+figure(1)
+plot(c_lst)
+figure(2);
+plot(r_lst)
+figure(3);
+plot(g_lst)
+figure(4);
+plot(NE_lst)
+save('PG')
+
+%% NPG
+T = 1000; 
+%T = 20000;
+
+[pi_lst, r_lst, c_lst,g_lst, NE_lst] = NPG(pi, R, T, eta);
+
+figure(1)
+plot(c_lst)
+figure(2);
+plot(r_lst)
+figure(3);
+plot(g_lst)
+figure(4);
+plot(NE_lst)
+save('NPG')
+
+%% log barrier PG
+lambda = 0.003;
+T = 1000; 
+%T = 20000;
+
+[pi_lst, r_lst, c_lst,g_lst, NE_lst] = log_barrier_PG(pi, R, T, eta, lambda);
+
+figure(1)
+plot(c_lst)
+figure(2);
+plot(r_lst)
+figure(3);
+plot(g_lst)
+figure(4);
+plot(NE_lst)
+save('log_barrier_PG')
+
+%% log barrier NPG
+lambda = 0.003;
+T = 1000; 
+%T = 20000;
+
+[pi_lst, r_lst, c_lst,g_lst, NE_lst] = log_barrier_NPG(pi, R, T, eta, lambda);
+
+figure(1)
+plot(c_lst)
+figure(2);
+plot(r_lst)
+figure(3);
+plot(g_lst)
+figure(4);
+plot(NE_lst)
+save('log_barrier_NPG')
+
+%%
+% pi is a max|Ai| * n matrix
+% R is a tensor of dimension |A1|*|A2|*...*|An|
+function [pi_lst, r_lst,c_lst,g_lst,NE_lst] = PG(pi, R, T, eta)
+pi_lst = zeros(size(pi,1),size(pi,2),T);
+r_lst = zeros(T,1);
+c_lst = zeros(T,1);
+g_lst = zeros(T,1);
+NE_lst = zeros(T,1);
+n = length(size(R));
+for t = 1:T
+pi_old = pi;
+g = 0;
+c = 1;
+NE_gap = 0;
+for i = 1:n
+Ai = size(R,i);
+pi_i = pi(1:Ai,i);
+q = calc_averaged_Q(pi_old, R, i);
+r = dot(q, pi_i);
+[max_i,idx_i] = max(q);
+c = min(c, pi_i(idx_i));
+NE_gap = max(NE_gap, max_i - r);
+grad = (q-r).*pi_i;%gradient
+g = g + norm(grad)^2;
+pi_i = multiplicative_weight(pi_i, eta*grad);
+pi(1:Ai, i) = pi_i;
+%NE_gap = max(NE_gap, )
+end
+pi_lst(:,:,t) = pi_old;
+r_lst(t,:) = r;
+NE_lst(t,:) = NE_gap;
+c_lst(t,:) = c;
+g_lst(t,:) = sqrt(g);
+end
+end
+
+function [pi_lst, r_lst,c_lst,g_lst,NE_lst] = NPG(pi, R, T, eta)
+pi_lst = zeros(size(pi,1),size(pi,2),T);
+r_lst = zeros(T,1);
+c_lst = zeros(T,1);
+g_lst = zeros(T,1);
+NE_lst = zeros(T,1);
+n = length(size(R));
+for t = 1:T
+pi_old = pi;
+g = 0;
+c = 1;
+NE_gap = 0;
+for i = 1:n
+Ai = size(R,i);
+pi_i = pi(1:Ai,i);
+q = calc_averaged_Q(pi_old, R, i);
+r = dot(q, pi_i);
+[max_i,idx_i] = max(q);
+c = min(c, pi_i(idx_i));
+NE_gap = max(NE_gap, max_i - r);
+grad = (q-r).*pi_i;%gradient
+g = g + norm(grad)^2;
+pi_i = multiplicative_weight(pi_i, eta*q);
+pi(1:Ai, i) = pi_i;
+%NE_gap = max(NE_gap, )
+end
+pi_lst(:,:,t) = pi_old;
+r_lst(t,:) = r;
+NE_lst(t,:) = NE_gap;
+c_lst(t,:) = c;
+g_lst(t,:) = sqrt(g);
+end
+end
+
+function [pi_lst, r_lst,c_lst,g_lst,NE_lst] = log_barrier_PG(pi, R, T, eta, lambda)
+pi_lst = zeros(size(pi,1),size(pi,2),T);
+r_lst = zeros(T,1);
+c_lst = zeros(T,1);
+g_lst = zeros(T,1);
+NE_lst = zeros(T,1);
+n = length(size(R));
+for t = 1:T
+pi_old = pi;
+g = 0;
+c = 1;
+NE_gap = 0;
+for i = 1:n
+Ai = size(R,i);
+pi_i = pi(1:Ai,i);
+q = calc_averaged_Q(pi_old, R, i);
+r = dot(q, pi_i);
+[max_i,idx_i] = max(q);
+c = min(c, pi_i(idx_i));
+NE_gap = max(NE_gap, max_i - r);
+grad = (q-r).*pi_i; % gradient
+g = g + norm(grad)^2;
+grad_reg = ones(size(pi_i)); % gradient of the log-barrier regularization
+grad_reg = grad_reg - Ai*pi_i;
+pi_i = multiplicative_weight(pi_i, eta*(grad + lambda*grad_reg));
+pi(1:Ai, i) = pi_i;
+end
+pi_lst(:,:,t) = pi_old;
+r_lst(t,:) = r;
+NE_lst(t,:) = NE_gap;
+c_lst(t,:) = c;
+g_lst(t,:) = sqrt(g);
+end
+end
+
+function [pi_lst, r_lst,c_lst,g_lst,NE_lst] = log_barrier_NPG(pi, R, T, eta, lambda)
+pi_lst = zeros(size(pi,1),size(pi,2),T);
+r_lst = zeros(T,1);
+c_lst = zeros(T,1);
+g_lst = zeros(T,1);
+NE_lst = zeros(T,1);
+n = length(size(R));
+for t = 1:T
+pi_old = pi;
+g = 0;
+c = 1;
+NE_gap = 0;
+for i = 1:n
+Ai = size(R,i);
+pi_i = pi(1:Ai,i);
+q = calc_averaged_Q(pi_old, R, i);
+r = dot(q, pi_i);
+[max_i,idx_i] = max(q);
+c = min(c, pi_i(idx_i));
+NE_gap = max(NE_gap, max_i - r);
+grad = (q-r).*pi_i; % gradient
+g = g + norm(grad)^2;
+grad_reg = ones(size(pi_i)); % gradient of the log-barrier regularization
+grad_reg = grad_reg - Ai*pi_i;
+w = eta*(grad + lambda*grad_reg)./pi_i;
+w(w > 1) = 1; w(w<-1) = -1;
+pi_i = multiplicative_weight(pi_i, w);
+pi(1:Ai, i) = pi_i;
+end
+pi_lst(:,:,t) = pi_old;
+r_lst(t,:) = r;
+NE_lst(t,:) = NE_gap;
+c_lst(t,:) = c;
+g_lst(t,:) = sqrt(g);
+end
+end
+
+%% Auxillary functions
+function pi = multiplicative_weight(pi, w)
+pi = pi.* exp(w);
+pi = pi/(sum(pi));
+end
+
+function w = calc_averaged_Q(pi, R, i)
+n = length(size(R));
+w = R;
+for j = 1:n
+    if i ~= j
+        Aj = size(R,j);
+        pi_j = pi(1:Aj,j);
+        if i>j
+            w = tensorprod(w, pi_j,1,1);
+        else
+            w = tensorprod(w,pi_j,2,1);
+        end  
+    end
+end
+end
